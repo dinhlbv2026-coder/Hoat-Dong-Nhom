@@ -1268,6 +1268,7 @@ table.hb td.bad{background:rgba(220,38,38,.06)}
 </header>
 <div id="kqBar" class="glass" style="display:none;margin:10px 0;padding:9px 14px;border-radius:14px;font-size:13px;line-height:1.5"></div>
 <script src="../../Tram%20Chom%20Sao/thien-hau/dashboard-thuong/du-lieu.js"></script>
+<script src="../../Tram%20Chom%20Sao/thien-hau/cskk/ma-tvv.js"></script>
 <script src="../../Tram%20Chom%20Sao/thien-hau/dashboard-thuong/tu-nhap.js"></script>
 <script>/* Hợp đồng tự nhập (tu-nhap.js): cộng vào Thực hiện cho tới khi file Excel có số đến ngày đó */
 (function(){const D=window.DL;if(!D||!D.tvv||!window.TUNHAP)return;const by={};D.tvv.forEach(p=>by[p.ma]=p);
@@ -4659,9 +4660,35 @@ function trackAD(){const D=(window.DL&&window.DL.tvv)||[];if(S.trackAD===undefin
 const trackLbl=()=>{const n=groupsList().length,ad=S.trackAD;return ad?`${n} nhóm AD ${ad.split(" ").pop()}`:`${n} nhóm theo dõi`};
 function trackUI(){const s=$("#mgAD");if(!s)return;const D=(window.DL&&window.DL.tvv)||[],A={};D.forEach(p=>{if(p.ad&&p.nhom){(A[p.ad]=A[p.ad]||new Set()).add(p.nhom)}});
   s.innerHTML='<option value="">— Không theo AD (chỉ các nhóm tự thêm) —</option>'+Object.keys(A).filter(a=>!/^(Văn phòng|Phòng)/i.test(a)).sort((a,b)=>a.localeCompare(b,"vi")).map(a=>`<option value="${esc(a)}">${esc(a)} · ${A[a].size} nhóm</option>`).join("");s.value=S.trackAD||""}
+/* 24/11/2026 (anh yêu cầu): TVV tự nhập chưa có mã → tự gán mã theo tên + nhóm, tìm trong danh bạ du-lieu.js rồi file CSKK công ty (cskk/ma-tvv.js).
+   Chỉ gán khi khớp đúng một mã chưa dùng; trùng tên nhiều mã thì để trống, báo trên thanh liên kết. */
+function ganMa(D){const used=new Set(S.rows.map(r=>String(r.ma||"").trim()).filter(Boolean)),gn=s=>noAcc(String(s||"").replace(/^Nhóm gốc\s*/i,""));
+  const dir=[...((D&&D.tvv)||[]).map(p=>({ma:p.ma,n:p.n,nhom:p.nhom})),...(window.MA_TVV||[])],gan=[],chua=[];
+  S.rows.forEach(r=>{if(r.ext||String(r.ma||"").trim()||!String(r.ten||"").trim())return;const k=noAcc(r.ten);
+    let c=[...new Set(dir.filter(p=>noAcc(p.n)===k&&gn(p.nhom)===gn(r.nhom)).map(p=>String(p.ma).trim()))].filter(m=>!used.has(m));
+    if(c.length===1){r.ma=c[0];used.add(c[0]);gan.push(r.ten+" → "+c[0])}else chua.push(r.ten+(c.length>1?" (trùng tên "+c.length+" mã)":""))});
+  if(gan.length){save();setTimeout(()=>toast(`Đã tự gán mã cho ${gan.length} TVV: ${gan.slice(0,4).join(", ")}${gan.length>4?"…":""}`),900)}
+  return {gan,chua}}
+/* Số liệu Kết quả theo dõi khi trang mở ngoài thư mục máy (vd. bản GitHub Pages): chọn file du-lieu.js một lần,
+   trang nhớ file (IndexedDB của trình duyệt này) và tự đọc bản mới mỗi lần mở. Chỉ đọc trong trình duyệt, không gửi đi đâu. */
+const DLF={ask:0};
+function dlDB(){return new Promise((ok,no)=>{const q=indexedDB.open("bvnt-dl",1);q.onupgradeneeded=()=>q.result.createObjectStore("kv");q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})}
+async function dlGet(k){const d=await dlDB();return new Promise(ok=>{const r=d.transaction("kv").objectStore("kv").get(k);r.onsuccess=()=>ok(r.result);r.onerror=()=>ok(null)})}
+async function dlPut(k,v){const d=await dlDB();return new Promise(ok=>{const t=d.transaction("kv","readwrite");t.objectStore("kv").put(v,k);t.oncomplete=ok;t.onerror=ok})}
+function dlApply(txt,silent){const w={};try{new Function("window",txt)(w)}catch(e){toast("File không đúng dạng du-lieu.js");return false}
+  if(!w.DL||!w.DL.tvv){toast("File không có danh sách TVV, cần chọn du-lieu.js");return false}
+  const same=window.DL&&window.DL.lap_luc===w.DL.lap_luc;window.DL=w.DL;if(same)return true;
+  try{trackAD();normAll();trackUI()}catch(e){console.error(e)}KQ_DONE=false;renderAll();if(!silent)toast(`Đã đọc số liệu lập lúc ${w.DL.lap_luc||""}`);return true}
+async function dlPick(){try{if(window.showOpenFilePicker){const [h]=await showOpenFilePicker({types:[{description:"du-lieu.js",accept:{"text/javascript":[".js"]}}]});const t=await (await h.getFile()).text();if(dlApply(t)){DLF.ask=0;await dlPut("h",h);await dlPut("t",t)}return}}
+  catch(e){if(e.name==="AbortError")return;console.error(e)}
+  const i=document.createElement("input");i.type="file";i.accept=".js";i.onchange=async()=>{const f=i.files[0];if(!f)return;const t=await f.text();if(dlApply(t))await dlPut("t",t)};i.click()}
+async function dlAgain(){const h=await dlGet("h");if(!h)return dlPick();try{if(await h.requestPermission({mode:"read"})==="granted"){const t=await (await h.getFile()).text();DLF.ask=0;if(dlApply(t))await dlPut("t",t);kqBar()}}catch(e){dlPick()}}
+async function dlBoot(){if(window.DL&&window.DL.tvv)return;try{const t=await dlGet("t");if(t)dlApply(t,true);const h=await dlGet("h");if(!h)return;
+  if(await h.queryPermission({mode:"read"})==="granted"){const n=await (await h.getFile()).text();if(n!==t){dlApply(n,true);dlPut("t",n)}}else{DLF.ask=1;kqBar()}}catch(e){console.error(e)}}
 let KQ_DONE=false,KQ={};
 function kqSync(force){const D=window.DL;if(!D||!D.tvv){KQ={none:1};return}
   if(KQ_DONE&&!force)return;KQ_DONE=true;
+  const GAN=ganMa(D);
   const mon=`${D.nam}-${String(D.thang).padStart(2,"0")}`,den=String(D.so_den_ngay||"");
   if(S.month&&S.month!==mon){KQ={skip:`Số liệu Kết quả là tháng ${D.thang}/${D.nam}, khác tháng đang theo dõi (${S.month}) nên chưa lấy.`};return}
   if(S.kqAuto===false){KQ={off:1,den};return}
@@ -4674,15 +4701,15 @@ function kqSync(force){const D=window.DL;if(!D||!D.tvv){KQ={none:1};return}
   D.tvv.filter(p=>G.includes(p.nhom)&&!p.pa&&!have.has(String(p.ma).trim())).forEach(p=>{const mate=S.rows.find(r=>r.nhom===p.nhom)||{};let cd=cdOf(String(p.cv||""));try{if(typeof normCd==="function")cd=normCd(cd)||cd}catch(e){}
     S.rows.push({id:"r"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),kv:mate.kv||"CL&LV",ban:mate.ban||p.bn||"",nhom:p.nhom,ma:p.ma,ten:p.n,cd,dt:null,hd:null,solan:null,slkh:null,dtdk:null,nlv:null,ev:{},thdt:Math.round((+p.f0||0)*10)/10,thhd:+p.hd||0,thph:Math.round((+p.chot||0)*10)/10,thcho:Math.round((+p.cho||0)*10)/10,kqDen:den,kqMoi:den,thdtTay:null,thhdTay:null});moi.push(p.n+(p.nw&&p.vm?` (tháng thứ ${p.vm.thang})`:""))});
   const bdMax=D.tvv.map(p=>p.bd||"").sort().pop()||"";
-  KQ={n:n+moi.length,miss,den,tot:S.rows.length,moi,bdMax};save()}
+  KQ={n:n+moi.length,miss,den,tot:S.rows.length,moi,bdMax,gan:GAN.gan,chua:GAN.chua};save()}
 function kqOff(){S.kqAuto=false;S.rows.forEach(r=>{if(r.kqDen!=null){r.thdt=r.thdtTay;r.thhd=r.thhdTay;delete r.kqDen;delete r.thph;delete r.thcho}});KQ_DONE=false;save();renderAll();toast("Đã tắt liên kết, trả lại số tự nhập")}
 function kqOn(){S.kqAuto=true;KQ_DONE=false;renderAll();toast("Đã bật liên kết Kết quả theo dõi")}
 function kqBar(){const b=document.getElementById("kqBar");if(!b)return;const dd=d=>d?d.slice(8,10)+"/"+d.slice(5,7):"";
-  if(KQ.none){b.style.display="block";b.innerHTML=`Chưa đọc được số liệu Kết quả theo dõi (<code>Tram Chom Sao/thien-hau/dashboard-thuong/du-lieu.js</code>). Chạy <b>mo-dashboard.command</b> để cập nhật.`;return}
+  if(KQ.none){b.style.display="block";b.innerHTML=`Chưa có số liệu Kết quả theo dõi. <button class="btn" style="padding:2px 10px" onclick="dlPick()">Chọn file du-lieu.js</button> <span class="muted">trong thư mục Tram Chom Sao/thien-hau/dashboard-thuong · chọn một lần, lần sau trang tự đọc bản mới · chỉ đọc trong trình duyệt này, không gửi đi đâu</span>`;return}
   b.style.display="block";
   if(KQ.skip){b.innerHTML=KQ.skip;return}
   if(KQ.off){b.innerHTML=`Liên kết Kết quả theo dõi đang <b>tắt</b>, cột Thực hiện dùng số tự nhập. <button class="btn" style="padding:2px 10px" onclick="kqOn()">Bật lại</button>`;return}
-  b.innerHTML=`<span class="status st-good">Đã liên kết</span> Cột <b>Thực hiện lũy kế</b> lấy tự động từ <b>Kết quả theo dõi</b>, số đến <b>${dd(KQ.den)}</b> (FYP tháng gồm tạm thu; số HĐ gồm hồ sơ chờ) · khớp ${KQ.n}/${KQ.tot} TVV theo mã`+(KQ.moi&&KQ.moi.length?` · <span class="status st-good">vừa thêm ${KQ.moi.length} TVV mới: ${KQ.moi.slice(0,6).map(esc).join(", ")}${KQ.moi.length>6?"…":""}</span>`:"")+(KQ.bdMax?` · danh sách TVV trong file Excel tính đến người vào làm ngày ${dd(KQ.bdMax)}`:"")+(KQ.miss&&KQ.miss.length?` · <span class="status st-warn">chưa khớp mã: ${KQ.miss.slice(0,5).map(esc).join(", ")}${KQ.miss.length>5?"…":""}</span>`:"")+` <button class="btn" style="padding:2px 10px;margin-left:6px" onclick="kqOff()">Tắt, dùng số tự nhập</button>`}
+  b.innerHTML=`<span class="status st-good">Đã liên kết</span> Cột <b>Thực hiện lũy kế</b> lấy tự động từ <b>Kết quả theo dõi</b>, số đến <b>${dd(KQ.den)}</b> (FYP tháng gồm tạm thu; số HĐ gồm hồ sơ chờ) · khớp ${KQ.n}/${KQ.tot} TVV theo mã`+(KQ.moi&&KQ.moi.length?` · <span class="status st-good">vừa thêm ${KQ.moi.length} TVV mới: ${KQ.moi.slice(0,6).map(esc).join(", ")}${KQ.moi.length>6?"…":""}</span>`:"")+(KQ.bdMax?` · danh sách TVV trong file Excel tính đến người vào làm ngày ${dd(KQ.bdMax)}`:"")+(KQ.gan&&KQ.gan.length?` · <span class="status st-good">vừa gán mã ${KQ.gan.length} TVV: ${KQ.gan.slice(0,4).map(esc).join(", ")}${KQ.gan.length>4?"…":""}</span>`:"")+(KQ.chua&&KQ.chua.length?` · <span class="status st-warn">chưa có mã, chưa tìm thấy trong danh sách công ty: ${KQ.chua.slice(0,5).map(esc).join(", ")}${KQ.chua.length>5?"…":""}</span>`:"")+(KQ.miss&&KQ.miss.length?` · <span class="status st-warn">chưa khớp mã: ${KQ.miss.slice(0,5).map(esc).join(", ")}${KQ.miss.length>5?"…":""}</span>`:"")+` <button class="btn" style="padding:2px 10px;margin-left:6px" onclick="kqOff()">Tắt, dùng số tự nhập</button>`}
 function renderAll(keepSettings){const safe=(f,n)=>{try{f()}catch(e){console.error(n,e);window.reportErr&&reportErr(e,n)}};
   safe(()=>{kqSync();kqBar()},"Kết quả");
   safe(()=>{$("#ttl").textContent=S.title; $("#sub").firstChild.textContent=S.kv+" · Bảo Việt Nhân thọ Đồng Tháp · "},"Tiêu đề");
@@ -4866,6 +4893,8 @@ function emSwap(root){if(!root)return;if(root.nodeType===3){if(EMT.test(root.dat
 try{emSwap(document.body);new MutationObserver(ms=>{for(const m of ms){if(m.type==="characterData"){if(EMT.test(m.target.data))emNode(m.target)}else m.addedNodes.forEach(emSwap)}})
   .observe(document.body,{childList:true,subtree:true,characterData:true})}catch(e){console.error(e)}
 [trackAD,normAll,migrateTN,giftMigrate,trackUI].forEach(f=>{try{f()}catch(e){window.reportErr&&reportErr(e,"Khởi động "+f.name)}});renderAll();
+{const _kb=kqBar;kqBar=function(){_kb();const b=document.getElementById("kqBar");if(b&&DLF.ask&&!KQ.none)b.insertAdjacentHTML("afterbegin",`<button class="btn" style="padding:2px 10px;margin-right:8px" onclick="dlAgain()">Đọc số liệu mới nhất</button>`)}}
+dlBoot();
 try{const t=localStorage.getItem(KEY+"-tab"); if(t) $(`nav.tabs button[data-v="${t}"]`)?.click()}catch(e){}
 requestAnimationFrame(()=>replay());
 </script>
